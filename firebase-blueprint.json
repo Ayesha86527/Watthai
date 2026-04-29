@@ -1,0 +1,163 @@
+{
+  "entities": {
+    "Zone": {
+      "title": "Zone",
+      "description": "Karachi geographic zone.",
+      "type": "object",
+      "properties": {
+        "name_en": { "type": "string" },
+        "name_ur": { "type": "string" },
+        "city": { "type": "string" },
+        "is_active": { "type": "boolean" }
+      },
+      "required": ["name_en", "name_ur", "city", "is_active"]
+    },
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Extended user profile information.",
+      "type": "object",
+      "properties": {
+        "phone": { "type": "string" },
+        "zone_id": { "type": "string" },
+        "language": { "type": "string", "enum": ["en", "ur"] },
+        "fcm_token": { "type": "string" },
+        "alert_opt_in": { "type": "boolean" },
+        "house_rooms": { "type": "number" },
+        "house_acs": { "type": "number" },
+        "house_fridges": { "type": "number" },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["language", "alert_opt_in", "created_at"]
+    },
+    "Bill": {
+      "title": "Bill",
+      "description": "A scanned bill.",
+      "type": "object",
+      "properties": {
+        "user_id": { "type": "string" },
+        "image_path": { "type": "string" },
+        "billing_month": { "type": "string" },
+        "consumer_number": { "type": "string" },
+        "units_consumed": { "type": "number" },
+        "energy_charges": { "type": "number" },
+        "fuel_cost_adjustment": { "type": "number" },
+        "fca_rate_per_unit": { "type": "number" },
+        "fixed_charges": { "type": "number" },
+        "electricity_duty": { "type": "number" },
+        "gst": { "type": "number" },
+        "other_taxes": { "type": "number" },
+        "total_payable": { "type": "number" },
+        "due_date": { "type": "string", "format": "date-time" },
+        "arrears": { "type": "number" },
+        "notices": { "type": "array" },
+        "anomalies": { "type": "array" },
+        "extracted_json": { "type": "object" },
+        "tips_json": { "type": "array" },
+        "benchmark_json": { "type": "object" },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["user_id", "created_at"]
+    },
+    "ZoneBenchmark": {
+      "title": "Zone Benchmark",
+      "description": "Aggregated benchmark data for a zone.",
+      "type": "object",
+      "properties": {
+        "zone_id": { "type": "string" },
+        "month": { "type": "string" },
+        "avg_units": { "type": "number" },
+        "p25_units": { "type": "number" },
+        "p75_units": { "type": "number" },
+        "sample_size": { "type": "number" },
+        "updated_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["zone_id", "month", "avg_units", "updated_at"]
+    },
+    "Outage": {
+      "title": "Outage",
+      "description": "An active or resolved power outage.",
+      "type": "object",
+      "properties": {
+        "zone_id": { "type": "string" },
+        "started_at": { "type": "string", "format": "date-time" },
+        "resolved_at": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["active", "resolving", "restored"] },
+        "report_count": { "type": "number" }
+      },
+      "required": ["zone_id", "started_at", "status", "report_count"]
+    },
+    "OutageReport": {
+      "title": "Outage Report",
+      "description": "A single user's report of an outage.",
+      "type": "object",
+      "properties": {
+        "outage_id": { "type": "string" },
+        "user_id": { "type": "string" },
+        "zone_id": { "type": "string" },
+        "photo_url": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["outage_id", "user_id", "zone_id", "created_at"]
+    },
+    "RestorationPoll": {
+      "title": "Restoration Poll",
+      "description": "User's response if power is back.",
+      "type": "object",
+      "properties": {
+        "outage_id": { "type": "string" },
+        "user_id": { "type": "string" },
+        "response": { "type": "string", "enum": ["yes", "no"] },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["outage_id", "user_id", "response", "created_at"]
+    },
+    "NewsItem": {
+      "title": "News Item",
+      "description": "Electricity news updates.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "source": { "type": "string" },
+        "url": { "type": "string" },
+        "published_at": { "type": "string", "format": "date-time" },
+        "category": { "type": "string", "enum": ["tariffs", "nepra", "loadshedding", "ke_updates", "general"] },
+        "fetched_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "source", "url", "fetched_at"]
+    }
+  },
+  "firestore": {
+    "/zones/{zoneId}": {
+      "schema": { "$ref": "Zone" },
+      "description": "List of geographic zones. Read-only."
+    },
+    "/users/{userId}": {
+      "schema": { "$ref": "UserProfile" },
+      "description": "User profiles. Owned by user."
+    },
+    "/bills/{billId}": {
+      "schema": { "$ref": "Bill" },
+      "description": "User Bills. Owned by user."
+    },
+    "/zoneBenchmarks/{benchmarkId}": {
+      "schema": { "$ref": "ZoneBenchmark" },
+      "description": "Aggregated benchmarks. Read-only."
+    },
+    "/outages/{outageId}": {
+      "schema": { "$ref": "Outage" },
+      "description": "Outage events. Read-only for standard users (updates happen via function or allowed fields)."
+    },
+    "/outageReports/{reportId}": {
+      "schema": { "$ref": "OutageReport" },
+      "description": "Reports by users."
+    },
+    "/restorationPolls/{pollId}": {
+      "schema": { "$ref": "RestorationPoll" },
+      "description": "Polls for restoration by users."
+    },
+    "/newsItems/{newsId}": {
+      "schema": { "$ref": "NewsItem" },
+      "description": "News items. Read-only."
+    }
+  }
+}

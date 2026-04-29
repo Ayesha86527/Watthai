@@ -1,0 +1,105 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} { 
+      allow read, write: if false; 
+    }
+
+    // --- PRIMITIVES ---
+    function isSignedIn() { return request.auth != null; }
+    function isOwner(userId) { return isSignedIn() && request.auth.uid == userId; }
+    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+
+    function isSystemFieldsSafe() {
+      return !('created_at' in incoming().diff(existing()).affectedKeys());
+    }
+
+    // --- VALIDATION HELPERS ---
+    function isValidUserProfile(data) {
+      return data.keys().hasAll(['language', 'alert_opt_in', 'created_at'])
+          && data.language in ['en', 'ur']
+          && data.alert_opt_in is bool
+          && data.created_at == request.time
+          && data.get('phone', '') is string
+          && data.get('phone', '').size() <= 20
+          && data.get('zone_id', '') is string
+          && data.get('zone_id', '').size() <= 128
+          && data.get('fcm_token', '') is string
+          && data.get('fcm_token', '').size() <= 2048
+          && data.get('house_rooms', 0) is number
+          && data.get('house_acs', 0) is number
+          && data.get('house_fridges', 0) is number;
+    }
+
+    function isValidUserProfileUpdate(data) {
+      return data.get('language', existing().language) in ['en', 'ur']
+          && data.get('alert_opt_in', existing().alert_opt_in) is bool
+          && data.get('phone', existing().get('phone', '')) is string
+          && data.get('phone', existing().get('phone', '')).size() <= 20
+          && data.get('zone_id', existing().get('zone_id', '')) is string
+          && data.get('zone_id', existing().get('zone_id', '')).size() <= 128
+          && data.get('fcm_token', existing().get('fcm_token', '')) is string
+          && data.get('fcm_token', existing().get('fcm_token', '')).size() <= 2048
+          && data.get('house_rooms', existing().get('house_rooms', 0)) is number
+          && data.get('house_acs', existing().get('house_acs', 0)) is number
+          && data.get('house_fridges', existing().get('house_fridges', 0)) is number;
+    }
+
+    // -------------------------------------------------------------
+    // ZONES
+    match /zones/{zoneId} {
+      allow get, list: if true;
+    }
+
+    // ZONE BENCHMARKS
+    match /zoneBenchmarks/{benchmarkId} {
+      allow get, list: if true;
+    }
+
+    // NEWS ITEMS
+    match /newsItems/{newsId} {
+      allow get, list: if true;
+    }
+
+    // OUTAGES
+    match /outages/{outageId} {
+      allow get, list: if true;
+    }
+
+    // USER PROFILES
+    match /users/{userId} {
+      allow get: if isOwner(userId);
+      allow create: if isOwner(userId)
+                    && isValidId(userId)
+                    && isValidUserProfile(incoming())
+                    && incoming().keys().size() <= 9;
+                    
+      allow update: if isOwner(userId)
+                    && isValidUserProfileUpdate(incoming())
+                    && isSystemFieldsSafe()
+                    && incoming().diff(existing()).affectedKeys().hasOnly(['language', 'alert_opt_in', 'fcm_token', 'phone', 'zone_id', 'house_rooms', 'house_acs', 'house_fridges']);
+    }
+
+    // BILLS
+    match /bills/{billId} {
+      allow get, list: if isSignedIn() && resource.data.user_id == request.auth.uid;
+      // Write operations handled by secure Next.js API
+    }
+
+    // OUTAGE REPORTS
+    match /outageReports/{reportId} {
+      allow get, list: if isSignedIn();
+      // Creation handled by Next.js API
+    }
+
+    // RESTORATION POLLS
+    match /restorationPolls/{pollId} {
+      allow get, list: if isSignedIn();
+      // Creation/Updates handled by Next.js API
+    }
+  }
+}

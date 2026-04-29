@@ -1,0 +1,58 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: var(--font-epilogue), "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  --font-urdu: var(--font-noto-nastaliq), serif;
+}
+
+@layer base {
+  :root {
+    --bg-base: #0C0C0C;
+    --bg-surface: #161616;
+    --bg-elevated: #202020;
+    --bg-border: #2C2C2C;
+    --amber: #F59E0B;
+    --amber-dim: #92610A;
+    --teal: #2DD4BF;
+    --teal-dim: #0D9488;
+    --red-alert: #EF4444;
+    --red-dim: #991B1B;
+    --text-primary: #F0EDEA;
+    --text-secondary: #9A9590;
+    --text-muted: #5A5550;
+  }
+  
+  html, body {
+    background-color: var(--bg-base);
+    color: var(--text-primary);
+  }
+
+  body {
+    font-family: var(--font-sans);
+    line-height: 1.5;
+  }
+  
+  html[dir="rtl"] body {
+    font-family: var(--font-urdu), var(--font-sans);
+  }
+  
+  h1, h2, h3, h4, h5, h6 {
+    line-height: 1.2;
+    letter-spacing: -0.02em;
+  }
+  
+  .font-mono {
+    line-height: 1;
+  }
+}
+
+@layer utilities {
+  .border-solid-only {
+    border-style: solid !important;
+  }
+  .bg-elevated-hover:hover {
+    background-color: var(--bg-elevated);
+    transition: background 120ms ease, border-color 120ms ease;
+  }
+}
