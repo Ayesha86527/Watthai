@@ -2,72 +2,111 @@ import { NextResponse } from 'next/server';
 import { adminDb, adminAuth } from '@/lib/firebase/server';
 import { GoogleGenAI } from '@google/genai';
 
-export async function POST(req: Request) {
+function safeParseJSON(raw: string): any[] {
   try {
-    const aiApiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
-    if (!aiApiKey) {
-        return NextResponse.json({ error: "Missing Gemini API Key" }, { status: 500 });
+    return JSON.parse(raw);
+  } catch {
+    const cleaned = raw
+      .replace(/^```(?:json)?\s*/i, '')
+      .replace(/\s*```$/, '')
+      .trim();
+    try {
+      return JSON.parse(cleaned);
+    } catch {
+      return [];
     }
-    const ai = new GoogleGenAI({ apiKey: aiApiKey });
+  }
+}
 
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader) return NextResponse.json({ error: "Missing Auth" }, { status: 401 });
+export async function POST(req: Request) {
+  // Auth
+  const authHeader = req.headers.get('Authorization');
+  if (!authHeader?.startsWith('Bearer ')) {
+    return NextResponse.json({ error: 'Missing Authorization header' }, { status: 401 });
+  }
 
-    const decodedToken = await adminAuth.verifyIdToken(authHeader.replace("Bearer ", ""));
-    if (!decodedToken) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  let userId: string;
+  try {
+    const decoded = await adminAuth.verifyIdToken(
+      authHeader.replace('Bearer ', '')
+    );
+    userId = decoded.uid;
+  } catch {
+    return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 });
+  }
 
-    const { bill_id, appliances } = await req.json();
+  // Gemini
+  const geminiKey = process.env.GEMINI_API_KEY;
+  if (!geminiKey) {
+    return NextResponse.json({ error: 'Gemini API key not configured' }, { status: 500 });
+  }
+  const ai = new GoogleGenAI({ apiKey: geminiKey });
 
-    const billSnap = await adminDb.collection("bills").doc(bill_id).get();
-    if (!billSnap.exists) return NextResponse.json({ error: "Bill not found" }, { status: 404 });
+  // Parse body
+  let billId: string;
+  let appliances: string[];
+  try {
+    const body = await req.json();
+    if (!body.bill_id) throw new Error('bill_id is required');
+    billId = body.bill_id;
+    appliances = Array.isArray(body.appliances) ? body.appliances : [];
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message }, { status: 400 });
+  }
 
-    const bill = billSnap.data()!;
+  // Fetch bill
+  const billSnap = await adminDb.collection('bills').doc(billId).get();
+  if (!billSnap.exists) {
+    return NextResponse.json({ error: 'Bill not found' }, { status: 404 });
+  }
+  const bill = billSnap.data()!;
+  if (bill.user_id !== userId) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+  }
 
-    if (bill.user_id !== decodedToken.uid) {
-       return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
-    }
-
+  try {
     const prompt = `You are a home energy savings advisor for Karachi, Pakistan.
-Given the bill data and appliances, generate 3–5 specific actionable tips.
-Return ONLY a valid JSON array, no markdown.
+Generate 3–5 specific actionable tips based on this bill and appliances.
+Return ONLY a valid JSON array — no markdown, no preamble.
 
-Bill data: ${JSON.stringify({ 
-  units: bill.units_consumed, 
-  fca: bill.fuel_cost_adjustment, 
-  fca_rate: bill.fca_rate_per_unit || 4.2, 
-  total: bill.total_payable 
+Bill: ${JSON.stringify({
+  units_consumed:       bill.units_consumed,
+  energy_charges:       bill.energy_charges,
+  fuel_cost_adjustment: bill.fuel_cost_adjustment,
+  fca_rate_per_unit:    bill.fca_rate_per_unit ?? 4.2,
+  fixed_charges:        bill.fixed_charges,
+  total_payable:        bill.total_payable,
+  consumer_category:    bill.consumer_category,
 })}
 Appliances: ${JSON.stringify(appliances)}
 
-Each tip object MUST follow this schema:
+Each tip object:
 {
-  "tip_en": string (max 70 words, specific to Karachi context — mention FCA impact, summer heat, load-shedding),
-  "tip_ur": string (proper Urdu translation, max 70 words),
+  "tip_en": string (max 70 words, Karachi-specific — reference FCA, summer heat, load-shedding as relevant),
+  "tip_ur": string (proper Urdu, max 70 words),
   "estimated_saving_min_rs": number,
   "estimated_saving_max_rs": number,
   "effort": "low" | "medium" | "high",
   "category": "ac" | "lighting" | "timing" | "inverter" | "geyser" | "general"
 }
 
-Base rupee savings estimates on: FCA rate, current residential slab rates.
-Be specific — say "reducing AC from 8 to 6 hours" not "use AC less".`;
+Be specific: "reducing AC from 8 to 6 hours saves ~Rs.X" not "use AC less".`;
 
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      config: {
-        responseMimeType: "application/json",
-      }
+      model: 'gemini-2.5-flash',
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      config: { responseMimeType: 'application/json' },
     });
 
-    const tips = JSON.parse(response.text || "[]");
+    const tips = safeParseJSON(response.text ?? '[]');
 
-    // Update bill
-    await adminDb.collection("bills").doc(bill_id).update({ tips_json: tips });
+    // Save tips back to bill document
+    await adminDb.collection('bills').doc(billId).update({ tips_json: tips });
 
     return NextResponse.json({ tips });
 
   } catch (error: any) {
+    console.error('savings-tips error:', error.message);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }

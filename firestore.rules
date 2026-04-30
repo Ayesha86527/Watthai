@@ -1,105 +1,63 @@
 rules_version = '2';
-
 service cloud.firestore {
   match /databases/{database}/documents {
-    // 0. Global Safety Net
-    match /{document=**} { 
-      allow read, write: if false; 
+
+    // Helper function to check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
     }
 
-    // --- PRIMITIVES ---
-    function isSignedIn() { return request.auth != null; }
-    function isOwner(userId) { return isSignedIn() && request.auth.uid == userId; }
-    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
-    function incoming() { return request.resource.data; }
-    function existing() { return resource.data; }
-
-    function isSystemFieldsSafe() {
-      return !('created_at' in incoming().diff(existing()).affectedKeys());
+    // Helper function to check if user owns the document
+    function isOwner(userIdField) {
+      return isAuthenticated() && request.auth.uid == resource.data[userIdField];
     }
 
-    // --- VALIDATION HELPERS ---
-    function isValidUserProfile(data) {
-      return data.keys().hasAll(['language', 'alert_opt_in', 'created_at'])
-          && data.language in ['en', 'ur']
-          && data.alert_opt_in is bool
-          && data.created_at == request.time
-          && data.get('phone', '') is string
-          && data.get('phone', '').size() <= 20
-          && data.get('zone_id', '') is string
-          && data.get('zone_id', '').size() <= 128
-          && data.get('fcm_token', '') is string
-          && data.get('fcm_token', '').size() <= 2048
-          && data.get('house_rooms', 0) is number
-          && data.get('house_acs', 0) is number
-          && data.get('house_fridges', 0) is number;
+    function isOwnerCreate() {
+      return isAuthenticated() && request.auth.uid == request.resource.data.user_id;
     }
 
-    function isValidUserProfileUpdate(data) {
-      return data.get('language', existing().language) in ['en', 'ur']
-          && data.get('alert_opt_in', existing().alert_opt_in) is bool
-          && data.get('phone', existing().get('phone', '')) is string
-          && data.get('phone', existing().get('phone', '')).size() <= 20
-          && data.get('zone_id', existing().get('zone_id', '')) is string
-          && data.get('zone_id', existing().get('zone_id', '')).size() <= 128
-          && data.get('fcm_token', existing().get('fcm_token', '')) is string
-          && data.get('fcm_token', existing().get('fcm_token', '')).size() <= 2048
-          && data.get('house_rooms', existing().get('house_rooms', 0)) is number
-          && data.get('house_acs', existing().get('house_acs', 0)) is number
-          && data.get('house_fridges', existing().get('house_fridges', 0)) is number;
-    }
-
-    // -------------------------------------------------------------
-    // ZONES
-    match /zones/{zoneId} {
-      allow get, list: if true;
-    }
-
-    // ZONE BENCHMARKS
-    match /zoneBenchmarks/{benchmarkId} {
-      allow get, list: if true;
-    }
-
-    // NEWS ITEMS
-    match /newsItems/{newsId} {
-      allow get, list: if true;
-    }
-
-    // OUTAGES
-    match /outages/{outageId} {
-      allow get, list: if true;
-    }
-
-    // USER PROFILES
+    // Users collection - users can read all, update only their own
     match /users/{userId} {
-      allow get: if isOwner(userId);
-      allow create: if isOwner(userId)
-                    && isValidId(userId)
-                    && isValidUserProfile(incoming())
-                    && incoming().keys().size() <= 9;
-                    
-      allow update: if isOwner(userId)
-                    && isValidUserProfileUpdate(incoming())
-                    && isSystemFieldsSafe()
-                    && incoming().diff(existing()).affectedKeys().hasOnly(['language', 'alert_opt_in', 'fcm_token', 'phone', 'zone_id', 'house_rooms', 'house_acs', 'house_fridges']);
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && request.auth.uid == userId;
     }
 
-    // BILLS
+    // Bills collection - users can only access their own bills
     match /bills/{billId} {
-      allow get, list: if isSignedIn() && resource.data.user_id == request.auth.uid;
-      // Write operations handled by secure Next.js API
+      allow read: if isAuthenticated() && request.auth.uid == resource.data.user_id;
+      allow create: if isOwnerCreate();
+      allow update, delete: if isAuthenticated() && request.auth.uid == resource.data.user_id;
     }
 
-    // OUTAGE REPORTS
+    // Outages collection - public read, authenticated create
+    match /outages/{outageId} {
+      allow read: if true;  // Public read for community dashboard
+      allow create: if isAuthenticated();
+      allow update, delete: if false;  // Only server admin can update
+    }
+
+    // Outage reports collection - users can create, read is restricted
     match /outageReports/{reportId} {
-      allow get, list: if isSignedIn();
-      // Creation handled by Next.js API
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
     }
 
-    // RESTORATION POLLS
+    // Restoration polls - authenticated users can vote
     match /restorationPolls/{pollId} {
-      allow get, list: if isSignedIn();
-      // Creation/Updates handled by Next.js API
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+    }
+
+    // News items - public read, only server can write
+    match /newsItems/{newsId} {
+      allow read: if true;  // Public read for news feed
+      allow write: if false;  // Only server/cloud functions can write
+    }
+
+    // Zone benchmarks - public read for comparison
+    match /zoneBenchmarks/{benchmarkId} {
+      allow read: if true;  // Public read for benchmarking
+      allow write: if false;  // Only server can write
     }
   }
 }

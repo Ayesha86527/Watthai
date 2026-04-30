@@ -2,57 +2,63 @@ import { NextResponse } from 'next/server';
 import { adminDb } from '@/lib/firebase/server';
 
 export async function GET(req: Request) {
-    try {
-        const authHeader = req.headers.get("Authorization");
-        // In preview environments, we might hit this manually for testing, 
-        // so we'll allow an override header or verify cron secret
-        if (authHeader !== `Bearer ${process.env.CRON_SECRET}` && authHeader !== "Bearer TEST_MODE") {
-           return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-        }
+  const authHeader = req.headers.get('Authorization');
+  const isAuthorized =
+    authHeader === `Bearer ${process.env.CRON_SECRET}` ||
+    authHeader === 'Bearer TEST_MODE';
 
-        const thirtyMinsAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+  if (!isAuthorized) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
 
-        const outagesSnap = await adminDb.collection("outages")
-            .where("status", "==", "active")
-            .where("started_at", "<=", thirtyMinsAgo)
-            .get();
+  try {
+    const thirtyMinsAgo = new Date(
+      Date.now() - 30 * 60 * 1000
+    ).toISOString();
 
-        if (outagesSnap.empty) {
-            return NextResponse.json({ message: "No active outages to check" }, { status: 200 });
-        }
+    const outagesSnap = await adminDb.collection('outages')
+      .where('status', '==', 'active')
+      .where('started_at', '<=', thirtyMinsAgo)
+      .get();
 
-        let updatedOutages = 0;
-
-        for (const outageDoc of outagesSnap.docs) {
-            const outageId = outageDoc.id;
-            
-            const pollsSnap = await adminDb.collection("restorationPolls")
-                .where("outage_id", "==", outageId)
-                .get();
-
-            if (!pollsSnap.empty) {
-                let yesCount = 0;
-                let noCount = 0;
-
-                pollsSnap.docs.forEach((doc) => {
-                   if (doc.data().response === "yes") yesCount++;
-                   if (doc.data().response === "no") noCount++;
-                });
-
-                const total = yesCount + noCount;
-
-                if (total >= 5 && (yesCount / total) >= 0.6) {
-                    await adminDb.collection("outages").doc(outageId).update({
-                        status: "restored",
-                        resolved_at: new Date().toISOString()
-                    });
-                    updatedOutages++;
-                }
-            }
-        }
-        
-        return NextResponse.json({ message: "OK", updatedOutages }, { status: 200 });
-    } catch (error: any) {
-        return NextResponse.json({ error: error.message }, { status: 500 });
+    if (outagesSnap.empty) {
+      return NextResponse.json({ message: 'No active outages to check', updated: 0 });
     }
+
+    let updated = 0;
+
+    for (const outageDoc of outagesSnap.docs) {
+      const outageId = outageDoc.id;
+
+      const pollsSnap = await adminDb.collection('restorationPolls')
+        .where('outage_id', '==', outageId)
+        .get();
+
+      if (pollsSnap.empty) continue;
+
+      let yes = 0;
+      let no  = 0;
+      pollsSnap.docs.forEach(d => {
+        if (d.data().response === 'yes') yes++;
+        if (d.data().response === 'no')  no++;
+      });
+
+      const total = yes + no;
+      if (total >= 5 && yes / total >= 0.6) {
+        await adminDb.collection('outages').doc(outageId).update({
+          status:      'restored',
+          resolved_at: new Date().toISOString(),
+        });
+        // TODO: send FCM "power restored" notification to zone
+        console.log(`Outage ${outageId} marked restored`);
+        updated++;
+      }
+    }
+
+    return NextResponse.json({ message: 'OK', updated });
+
+  } catch (error: any) {
+    console.error('check-restoration error:', error.message);
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
 }
