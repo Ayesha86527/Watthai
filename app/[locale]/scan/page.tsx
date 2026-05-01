@@ -491,7 +491,7 @@ export default function ScanPage() {
                     </div>
                     <p className="text-[15px] text-[var(--text-primary)] mb-3">{tip.tip_en}</p>
                     <div className="inline-block bg-[#042F2E] text-[var(--teal)] font-mono text-[11px] px-2 py-1 rounded-sm">
-                      Save Rs. {tip.estimatedSavingMinRs?.toLocaleString()}–{tip.estimatedSavingMaxRs?.toLocaleString()}
+                      Save Rs. {tip.saving_min_rs?.toLocaleString() ?? '0'}–{tip.saving_max_rs?.toLocaleString() ?? '0'}
                     </div>
                   </div>
                 ))}

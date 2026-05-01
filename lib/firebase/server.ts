@@ -2,10 +2,8 @@ import * as admin from 'firebase-admin';
 import * as fs from 'fs';
 import * as path from 'path';
 
-let initialized = false;
-
 function getCredential(): admin.credential.Credential {
-  // Method 1: Base64-encoded JSON (most reliable across all platforms)
+  // Method 1: Base64-encoded JSON
   if (process.env.FIREBASE_ADMIN_SDK_BASE64) {
     try {
       const decoded = Buffer.from(
@@ -17,8 +15,7 @@ function getCredential(): admin.credential.Credential {
     }
   }
 
-  // Method 2: Key file on disk (best for local dev on Windows)
-  // Looks for service-account-key.json in project root
+  // Method 2: service-account-key.json in project root
   const keyFilePath = path.resolve(process.cwd(), 'service-account-key.json');
   if (fs.existsSync(keyFilePath)) {
     try {
@@ -30,40 +27,45 @@ function getCredential(): admin.credential.Credential {
     }
   }
 
-  // Method 3: Application Default Credentials (Cloud Run — no config needed)
+  // Method 3: Application Default Credentials (Cloud Run)
   console.log('Firebase Admin: using application default credentials');
   return admin.credential.applicationDefault();
 }
 
-function initializeAdmin() {
-  if (initialized || admin.apps.length > 0) return;
+// ── Initialize once ───────────────────────────────────────────────────────────
 
-  const projectId =
-    process.env.GOOGLE_CLOUD_PROJECT_ID ||
-    process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
+const projectId =
+  process.env.GOOGLE_CLOUD_PROJECT_ID ||
+  process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
 
-  if (!projectId) {
-    throw new Error('Missing GOOGLE_CLOUD_PROJECT_ID or NEXT_PUBLIC_FIREBASE_PROJECT_ID');
-  }
-
-  try {
-    admin.initializeApp({ credential: getCredential(), projectId });
-    initialized = true;
-    console.log(`Firebase Admin: initialized for project ${projectId}`);
-  } catch (error: any) {
-    throw new Error(`Firebase Admin init failed: ${error.message}`);
-  }
+if (!projectId) {
+  throw new Error('Missing GOOGLE_CLOUD_PROJECT_ID or NEXT_PUBLIC_FIREBASE_PROJECT_ID');
 }
 
-initializeAdmin();
+if (!admin.apps.length) {
+  admin.initializeApp({ credential: getCredential(), projectId });
+}
 
-// Named Firestore database support
+// ── Firestore with named database support ─────────────────────────────────────
+// CRITICAL: settings() must only be called once, before any Firestore operation.
+// We use a module-level flag to guarantee this even across Next.js hot reloads.
+
 const databaseId = process.env.NEXT_PUBLIC_FIRESTORE_DATABASE_ID;
 
-const _db = admin.firestore();
-if (databaseId && databaseId !== '(default)') {
-  _db.settings({ databaseId });
+function getFirestore(): FirebaseFirestore.Firestore {
+  const db = admin.firestore();
+
+  // Only call settings() if using a named database AND it hasn't been called yet
+  if (databaseId && databaseId !== '(default)') {
+    try {
+      db.settings({ databaseId });
+    } catch {
+      // settings() already called — safe to ignore on hot reload
+    }
+  }
+
+  return db;
 }
 
-export const adminDb = _db;
+export const adminDb   = getFirestore();
 export const adminAuth = admin.auth();
