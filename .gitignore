@@ -4,7 +4,6 @@ coverage/
 .DS_Store
 *.log
 .env*
-!.env.example
 service-account-key.json
 .env.local
 
