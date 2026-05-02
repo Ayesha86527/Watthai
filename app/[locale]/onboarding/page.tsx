@@ -753,7 +753,7 @@ export default function Onboarding() {
             <StepLabel>Step 6 of {TOTAL_STEPS}</StepLabel>
             <StepHeading>Stay ahead of outages</StepHeading>
             <StepSubtitle>
-              When 10+ neighbors in {zone ? ZONES.find(z => z.id === zone)?.en : "your area"} report a power cut, we'll notify you instantly.
+              When 10+ neighbors in {zone ? ZONES.find(z => z.id === zone)?.en : "your area"} report a power cut, We&apos;ll notify you instantly.
             </StepSubtitle>
 
             {/* Summary card */}

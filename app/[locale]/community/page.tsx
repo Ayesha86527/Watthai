@@ -129,7 +129,7 @@ function OutageCard({
 
       {/* Restoration poll — shown for active outages older than 30 mins */}
       {isActive && isUserZone && !pollSubmitted && (() => {
-        const ageMs = Date.now() - new Date(outage.started_at).getTime();
+        const ageMs = new Date().getTime() - new Date(outage.started_at).getTime();
         const show  = ageMs > 10 * 60 * 1000; // show after 10 mins for demo
         return show ? (
           <div className="border-t border-[var(--bg-border)] pt-3 mt-1">
