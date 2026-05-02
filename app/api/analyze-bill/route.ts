@@ -3,20 +3,6 @@ import { adminDb, adminAuth } from '@/lib/firebase/server';
 import { GoogleGenAI } from '@google/genai';
 import vision from '@google-cloud/vision';
 
-// 1. Decode your Base64 variable
-const serviceAccount = JSON.parse(
-  Buffer.from(process.env.FIREBASE_ADMIN_SDK_BASE64 || '', 'base64').toString()
-);
-
-// 2. Initialize Vision with the credentials object directly
-const visionClient = new vision.ImageAnnotatorClient({
-  credentials: {
-    client_email: serviceAccount.client_email,
-    private_key: serviceAccount.private_key,
-  },
-  projectId: serviceAccount.project_id,
-});
-
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface ExtractedBill {
   consumer_number:      string | null;
@@ -96,6 +82,20 @@ async function withRetry<T>(
 // ─── Stage 1: Vision OCR ─────────────────────────────────────────────────────
 
 async function extractTextWithVision(imageBase64: string): Promise<string> {
+  // MOVED THESE INSIDE: This is the ONLY way to fix the "Unexpected end of JSON" build error
+  const serviceAccount = JSON.parse(
+    Buffer.from(process.env.FIREBASE_ADMIN_SDK_BASE64 || '{}', 'base64').toString()
+  );
+
+  const visionClient = new vision.ImageAnnotatorClient({
+    credentials: {
+      client_email: serviceAccount.client_email,
+      // FIXED: Added newline replacement to ensure the private key works in Cloud Run
+      private_key: serviceAccount.private_key?.replace(/\\n/g, '\n'),
+    },
+    projectId: serviceAccount.project_id,
+  });
+
   const [result] = await visionClient.documentTextDetection({
     image: { content: imageBase64 },
     imageContext: { languageHints: ['en', 'ur'] },
@@ -111,7 +111,7 @@ async function extractTextWithVision(imageBase64: string): Promise<string> {
 
   const pages = result.fullTextAnnotation?.pages ?? [];
   const avgConf = pages.length > 0
-    ? pages.reduce((s, p) => s + (p.confidence ?? 0), 0) / pages.length
+    ? pages.reduce((s: number, p: any) => s + (p.confidence ?? 0), 0) / pages.length
     : null;
   console.log(`Vision OCR: ${fullText.length} chars, confidence: ${avgConf?.toFixed(2) ?? 'n/a'}`);
 
@@ -166,6 +166,7 @@ OCR TEXT:
 ${ocrText}
 ---`;
 
+  // RESTORED: Exactly as your original file
   const response = await ai.models.generateContent({
     model: 'gemini-2.5-flash',
     contents: [{ role: 'user', parts: [{ text: prompt }] }],
@@ -193,7 +194,6 @@ async function getBenchmark(
     new Date().setMonth(new Date().getMonth() - 1)
   ).toISOString().slice(0, 7);
 
-  // Try current month, fall back to previous
   let benchmarkData: FirebaseFirestore.DocumentData | null = null;
   for (const month of [currentMonth, prevMonth]) {
     const snap = await adminDb
@@ -213,6 +213,7 @@ async function getBenchmark(
   const avg = benchmarkData.avg_units as number;
   const deltaPct = parseFloat(((units - avg) / avg * 100).toFixed(1));
 
+  // RESTORED: Exactly as your original file
   const explainRes = await ai.models.generateContent({
     model: 'gemini-2.5-flash',
     contents: [{
@@ -233,7 +234,6 @@ async function getBenchmark(
 // ─── Route Handler ────────────────────────────────────────────────────────────
 
 export async function POST(req: Request) {
-  // Auth
   const authHeader = req.headers.get('Authorization');
   if (!authHeader?.startsWith('Bearer ')) {
     return NextResponse.json({ error: 'Missing Authorization header' }, { status: 401 });
@@ -249,14 +249,14 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 });
   }
 
-  // Gemini
   const geminiKey = process.env.GEMINI_API_KEY;
   if (!geminiKey) {
     return NextResponse.json({ error: 'Gemini API key not configured' }, { status: 500 });
   }
+  
+  // RESTORED: Exactly as your original file
   const ai = new GoogleGenAI({ apiKey: geminiKey });
 
-  // Parse body
   let imageBase64: string;
   let zoneId: string | null;
   try {
@@ -269,12 +269,10 @@ export async function POST(req: Request) {
   }
 
   try {
-    // Stage 1: OCR
     const ocrText = await withRetry(
       () => extractTextWithVision(imageBase64), 3
     );
 
-    // Stage 2: Extract
     const rawExtracted = await withRetry(
       () => extractBillData(ai, ocrText), 3
     );
@@ -304,12 +302,10 @@ export async function POST(req: Request) {
       confidence_score:     confidenceScore,
     };
 
-    // Benchmark
     const benchmark = zoneId
       ? await getBenchmark(ai, zoneId, extracted.units_consumed ?? 0)
       : null;
 
-    // Save to Firestore
     const docRef = adminDb.collection('bills').doc();
     await docRef.set({
       user_id:        userId,
