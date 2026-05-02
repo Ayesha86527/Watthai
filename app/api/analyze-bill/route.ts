@@ -82,16 +82,21 @@ async function withRetry<T>(
 // ─── Stage 1: Vision OCR ─────────────────────────────────────────────────────
 
 async function extractTextWithVision(imageBase64: string): Promise<string> {
-  // MOVED THESE INSIDE: This is the ONLY way to fix the "Unexpected end of JSON" build error
+  // Move this inside the function to ensure the build environment doesn't crash
+  const base64Key = process.env.FIREBASE_ADMIN_SDK_BASE64;
+  if (!base64Key) {
+    throw new Error("Environment variable FIREBASE_ADMIN_SDK_BASE64 is missing");
+  }
+
   const serviceAccount = JSON.parse(
-    Buffer.from(process.env.FIREBASE_ADMIN_SDK_BASE64 || '{}', 'base64').toString()
+    Buffer.from(base64Key, 'base64').toString()
   );
 
   const visionClient = new vision.ImageAnnotatorClient({
     credentials: {
       client_email: serviceAccount.client_email,
-      // FIXED: Added newline replacement to ensure the private key works in Cloud Run
-      private_key: serviceAccount.private_key?.replace(/\\n/g, '\n'),
+      // THE CRITICAL FIX: Ensure newlines are correctly formatted for the RSA key
+      private_key: serviceAccount.private_key.replace(/\\n/g, '\n'),
     },
     projectId: serviceAccount.project_id,
   });
@@ -113,8 +118,7 @@ async function extractTextWithVision(imageBase64: string): Promise<string> {
   const avgConf = pages.length > 0
     ? pages.reduce((s: number, p: any) => s + (p.confidence ?? 0), 0) / pages.length
     : null;
-  console.log(`Vision OCR: ${fullText.length} chars, confidence: ${avgConf?.toFixed(2) ?? 'n/a'}`);
-
+  
   return fullText;
 }
 
@@ -166,7 +170,6 @@ OCR TEXT:
 ${ocrText}
 ---`;
 
-  // RESTORED: Exactly as your original file
   const response = await ai.models.generateContent({
     model: 'gemini-2.5-flash',
     contents: [{ role: 'user', parts: [{ text: prompt }] }],
@@ -213,7 +216,6 @@ async function getBenchmark(
   const avg = benchmarkData.avg_units as number;
   const deltaPct = parseFloat(((units - avg) / avg * 100).toFixed(1));
 
-  // RESTORED: Exactly as your original file
   const explainRes = await ai.models.generateContent({
     model: 'gemini-2.5-flash',
     contents: [{
@@ -253,8 +255,6 @@ export async function POST(req: Request) {
   if (!geminiKey) {
     return NextResponse.json({ error: 'Gemini API key not configured' }, { status: 500 });
   }
-  
-  // RESTORED: Exactly as your original file
   const ai = new GoogleGenAI({ apiKey: geminiKey });
 
   let imageBase64: string;
@@ -327,15 +327,8 @@ export async function POST(req: Request) {
 
   } catch (error: any) {
     console.error('analyze-bill error:', error.message);
-    const isVisionError =
-      error.message?.includes('Vision') ||
-      error.message?.includes('blurry') ||
-      error.message?.includes('insufficient text');
-
     return NextResponse.json({
-      error: isVisionError
-        ? 'Could not read the bill image. Please retake in good lighting with the full bill visible.'
-        : 'Bill analysis failed. Please try again or enter details manually.',
+      error: 'Bill analysis failed. Please try again or enter details manually.',
       detail: error.message,
     }, { status: 500 });
   }
