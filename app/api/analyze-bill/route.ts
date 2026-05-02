@@ -3,14 +3,21 @@ import { adminDb, adminAuth } from '@/lib/firebase/server';
 import { GoogleGenAI } from '@google/genai';
 import vision from '@google-cloud/vision';
 
-// Vision client — uses same service-account-key.json automatically
-// via GOOGLE_APPLICATION_CREDENTIALS or ADC
+// 1. Decode your Base64 variable
+const serviceAccount = JSON.parse(
+  Buffer.from(process.env.FIREBASE_ADMIN_SDK_BASE64 || '', 'base64').toString()
+);
+
+// 2. Initialize Vision with the credentials object directly
 const visionClient = new vision.ImageAnnotatorClient({
-  keyFilename: 'service-account-key.json',
+  credentials: {
+    client_email: serviceAccount.client_email,
+    private_key: serviceAccount.private_key,
+  },
+  projectId: serviceAccount.project_id,
 });
 
 // ─── Types ───────────────────────────────────────────────────────────────────
-
 interface ExtractedBill {
   consumer_number:      string | null;
   reference_number:     string | null;
