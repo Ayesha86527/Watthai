@@ -3,6 +3,15 @@ import { adminDb, adminAuth } from '@/lib/firebase/server';
 import { GoogleGenAI } from '@google/genai';
 import vision from '@google-cloud/vision';
 
+// FIX 1: Increase body limit for high-res bill images
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: '10mb',
+    },
+  },
+};
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface ExtractedBill {
   consumer_number:      string | null;
@@ -82,27 +91,16 @@ async function withRetry<T>(
 // ─── Stage 1: Vision OCR ─────────────────────────────────────────────────────
 
 async function extractTextWithVision(imageBase64: string): Promise<string> {
-  // Move this inside the function to ensure the build environment doesn't crash
-  const base64Key = process.env.FIREBASE_ADMIN_SDK_BASE64;
-  if (!base64Key) {
-    throw new Error("Environment variable FIREBASE_ADMIN_SDK_BASE64 is missing");
-  }
+  // FIX 2: Strip the "data:image/..." prefix which often crashes the Vision API
+  const cleanBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, "");
 
-  const serviceAccount = JSON.parse(
-    Buffer.from(base64Key, 'base64').toString()
-  );
-
-  const visionClient = new vision.ImageAnnotatorClient({
-    credentials: {
-      client_email: serviceAccount.client_email,
-      // THE CRITICAL FIX: Ensure newlines are correctly formatted for the RSA key
-      private_key: serviceAccount.private_key.replace(/\\n/g, '\n'),
-    },
-    projectId: serviceAccount.project_id,
-  });
+  // FIX 3: Simplified initialization. 
+  // On Cloud Run, this will automatically use the Service Account permissions 
+  // you set in the IAM console, bypassing Base64 environment variable issues.
+  const visionClient = new vision.ImageAnnotatorClient();
 
   const [result] = await visionClient.documentTextDetection({
-    image: { content: imageBase64 },
+    image: { content: cleanBase64 },
     imageContext: { languageHints: ['en', 'ur'] },
   });
 
@@ -114,11 +112,6 @@ async function extractTextWithVision(imageBase64: string): Promise<string> {
     );
   }
 
-  const pages = result.fullTextAnnotation?.pages ?? [];
-  const avgConf = pages.length > 0
-    ? pages.reduce((s: number, p: any) => s + (p.confidence ?? 0), 0) / pages.length
-    : null;
-  
   return fullText;
 }
 
