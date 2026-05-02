@@ -1,5 +1,4 @@
 node_modules
 .next
-.env.local
-service-account-key.json
 .git
+*.log
