@@ -2,6 +2,8 @@ import * as admin from 'firebase-admin';
 import * as fs from 'fs';
 import * as path from 'path';
 
+let initialized = false;
+
 function getCredential(): admin.credential.Credential {
   // Method 1: Base64-encoded JSON
   if (process.env.FIREBASE_ADMIN_SDK_BASE64) {
@@ -32,40 +34,58 @@ function getCredential(): admin.credential.Credential {
   return admin.credential.applicationDefault();
 }
 
-// ── Initialize once ───────────────────────────────────────────────────────────
+function initializeAdmin() {
+  if (initialized || admin.apps.length > 0) {
+    initialized = true;
+    return;
+  }
 
-const projectId =
-  process.env.GOOGLE_CLOUD_PROJECT_ID ||
-  process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
+  const projectId =
+    process.env.GOOGLE_CLOUD_PROJECT_ID ||
+    process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
 
-if (!projectId) {
-  throw new Error('Missing GOOGLE_CLOUD_PROJECT_ID or NEXT_PUBLIC_FIREBASE_PROJECT_ID');
+  // Don't throw at build time — only warn
+  if (!projectId) {
+    console.warn('Firebase Admin: no project ID found — skipping initialization');
+    return;
+  }
+
+  try {
+    admin.initializeApp({ credential: getCredential(), projectId });
+    initialized = true;
+    console.log(`Firebase Admin: initialized for project ${projectId}`);
+  } catch (error: any) {
+    throw new Error(`Firebase Admin init failed: ${error.message}`);
+  }
 }
 
-if (!admin.apps.length) {
-  admin.initializeApp({ credential: getCredential(), projectId });
-}
-
-// ── Firestore with named database support ─────────────────────────────────────
-// CRITICAL: settings() must only be called once, before any Firestore operation.
-// We use a module-level flag to guarantee this even across Next.js hot reloads.
-
-const databaseId = process.env.NEXT_PUBLIC_FIRESTORE_DATABASE_ID;
-
-function getFirestore(): FirebaseFirestore.Firestore {
+function getAdminDb(): FirebaseFirestore.Firestore {
+  initializeAdmin();
+  const databaseId = process.env.NEXT_PUBLIC_FIRESTORE_DATABASE_ID;
   const db = admin.firestore();
-
-  // Only call settings() if using a named database AND it hasn't been called yet
   if (databaseId && databaseId !== '(default)') {
     try {
       db.settings({ databaseId });
     } catch {
-      // settings() already called — safe to ignore on hot reload
+      // Already set — ignore
     }
   }
-
   return db;
 }
 
-export const adminDb   = getFirestore();
-export const adminAuth = admin.auth();
+function getAdminAuth(): admin.auth.Auth {
+  initializeAdmin();
+  return admin.auth();
+}
+
+export const adminDb = new Proxy({} as FirebaseFirestore.Firestore, {
+  get(_, prop) {
+    return (getAdminDb() as any)[prop];
+  },
+});
+
+export const adminAuth = new Proxy({} as admin.auth.Auth, {
+  get(_, prop) {
+    return (getAdminAuth() as any)[prop];
+  },
+});
