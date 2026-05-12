@@ -51,8 +51,8 @@ A comprehensive AI-powered energy management platform designed specifically for 
 ### Installation
 1. **Clone & Install**:
    ```bash
-   git clone https://github.com/your-username/ai-studio-applet.git
-   cd ai-studio-applet
+   git clone https://github.com/Ayesha86527/Watthai.git
+   cd Watthai
    npm install
    ```
 
